@@ -1,9 +1,15 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+import investpy as inv
 import seaborn as sns
 import matplotlib.pyplot as plt
 from datetime import date
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import GridSearchCV
+import plotly.graph_objects as go
 
 # Página Home
 def home():
@@ -84,7 +90,7 @@ def panorama():
         indice_diario = yf.download('^IXIC', period='1d', interval='5m')
 
     # Grafico de CandleStick
-    import plotly.graph_objects as go
+    
 
     fig = go.Figure(data=[go.Candlestick(x=indice_diario.index,
                         open=indice_diario['Open'],
@@ -238,12 +244,97 @@ def fundamentos():
                 st.write('**P/E:**', f"{float(info_papel2['PL'][0]):,.2f}")
                 st.write('**Dividend Yield:**', f"{info_papel2['Div_Yield'][0]}")
 
+def index_prediction():
+    st.title("Index Prediction")
+    st.subheader("Important: keep in mind that stock price prediction is a complex and uncertain task due to the many factors that influence stock prices.")
+
+    data_inicial = '2005-01-01'
+    data_final = str(date.today())
+
+    n_years = st.slider("Years of prediction", 1, 4)
+    period = n_years + 365
+
+    # Seleção de Indices e coleta de dados
+    indices_dict = {'Bovespa': '^BVSP', 'S&P 500': '^GSPC', 'Bitcoin USD': 'BTC-USD'}
+    ticker = st.selectbox('Index', list(indices_dict.keys()))
+    ticker_symbol = indices_dict[ticker]
+
+    # Fetch data using yfinance
+    retorno = yf.download(ticker_symbol, start=data_inicial, end=data_final, progress=False)
+    retorno.reset_index(inplace=True)
+
+    # Predict stock prices
+    with st.spinner('Downloading prices...'):
+        model, rmse_train, rmse_test = predict_stock_prices(retorno)
+
+    # Predicting for the future period
+    future_dates = pd.date_range(start=retorno['Date'].max(), periods=period, closed='right')
+    future_days_of_year = future_dates.dayofyear.values.reshape(-1, 1)
+    future_predictions = model.predict(future_days_of_year)
+
+    # Create a DataFrame for future predictions
+    future_predictions_df = pd.DataFrame({
+        'Date': future_dates,
+        'Predicted_Close': future_predictions
+    })
+
+
+    # Visualization using Plotly
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(x=retorno['Date'], open=retorno['Open'], high=retorno['High'], low=retorno['Low'], close=retorno['Close'], name='Historical Prices'))
+    fig.add_trace(go.Scatter(x=future_predictions_df['Date'], y=future_predictions_df['Predicted_Close'], mode='lines', name='Predicted Prices'))
+    fig.update_layout(title="Stock Price Prediction", xaxis_rangeslider_visible=False)
+    st.plotly_chart(fig)
+
+    st.write("RMSE for training data:", rmse_train)
+    st.write("RMSE for test data:", rmse_test)
+
+def predict_stock_prices(data):
+    data['Date'] = pd.to_datetime(data['Date'])
+    data = data.set_index('Date')
+    
+    # Feature engineering: using the day of the year as a feature
+    data['DayOfYear'] = data.index.dayofyear
+
+    # Split data into features (X) and target (y)
+    X = data[['DayOfYear']]
+    y = data['Close']
+
+    # Split data into training and testing sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    # Perform Grid Search for tuning hyperparameters
+    param_grid = {
+        'n_estimators': [50, 100, 200],
+        'max_depth': [None, 10, 20],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4]
+    }
+
+    model = GridSearchCV(
+        estimator=RandomForestRegressor(random_state=42),
+        param_grid=param_grid,
+        cv=3,
+        n_jobs=-1
+    )
+    model.fit(X_train, y_train)
+
+    # Make predictions
+    predictions_train = model.predict(X_train)
+    predictions_test = model.predict(X_test)
+
+    # Calculate RMSE for training and testing predictions
+    rmse_train = mean_squared_error(y_train, predictions_train, squared=False)
+    rmse_test = mean_squared_error(y_test, predictions_test, squared=False)
+
+    return model, rmse_train, rmse_test
+
 # Função principal
 def main():
     st.sidebar.image('grafico_logo.png', width=200)
     st.sidebar.title('Stock Market App')
     st.sidebar.markdown('---')
-    lista_menu=['Home', 'Market Overview', 'Monthly Returns','Fundamentals']
+    lista_menu=['Home', 'Market Overview', 'Monthly Returns', 'Fundamentals', 'Index Prediction']
     escolha = st.sidebar.radio('Escolha a opção', lista_menu)
 
     if escolha =='Home':
@@ -254,6 +345,8 @@ def main():
         mapa_mensal()
     if escolha == 'Fundamentals':
         fundamentos()
+    if escolha == 'Index Prediction':
+        index_prediction()
 
 
 if __name__ == "__main__":
