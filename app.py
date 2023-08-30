@@ -267,7 +267,7 @@ def index_prediction():
         model, rmse_train, rmse_test = predict_stock_prices(retorno)
 
     # Predicting for the future period
-    future_dates = pd.date_range(start=retorno['Date'].max(), periods=period, closed='right')
+    future_dates = pd.date_range(start=retorno['Date'].max(), periods=period, freq='D')
     future_days_of_year = future_dates.dayofyear.values.reshape(-1, 1)
     future_predictions = model.predict(future_days_of_year)
 
