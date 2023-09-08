@@ -9,6 +9,8 @@ from sklearn.metrics import mean_squared_error
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV
 import plotly.graph_objects as go
+from keras.models import load_model
+import numpy as np
 
 # Página Home
 def home():
@@ -250,9 +252,6 @@ def index_prediction():
     data_inicial = '2005-01-01'
     data_final = str(date.today())
 
-    n_years = st.slider("Years of prediction", 1, 4)
-    period = n_years + 365
-
     # Seleção de Indices e coleta de dados
     indices_dict = {'Bovespa': '^BVSP', 'S&P 500': '^GSPC', 'Bitcoin USD': 'BTC-USD'}
     ticker = st.selectbox('Index', list(indices_dict.keys()))
@@ -263,70 +262,70 @@ def index_prediction():
     retorno.reset_index(inplace=True)
 
     # Predict stock prices
-    with st.spinner('Downloading prices...'):
-        model, rmse_train, rmse_test = predict_stock_prices(retorno)
+    st.subheader("Data from 2005 - today")
+    st.subheader("Closing Price vs Time chart")
+    fig = plt.figure(figsize=(12,6))
+    plt.plot(retorno.Date, retorno.Close)
+    st.pyplot(fig)
 
-    # Predicting for the future period
-    future_dates = pd.date_range(start=retorno['Date'].max(), periods=period, freq='D')
-    future_days_of_year = future_dates.dayofyear.values.reshape(-1, 1)
-    future_predictions = model.predict(future_days_of_year)
+    st.subheader("Closing Price vs Time chart with 100MA")
+    ma100 = retorno.Close.rolling(100).mean()
+    fig = plt.figure(figsize=(12,6))
+    plt.plot(retorno.Date, ma100)
+    plt.plot(retorno.Date, retorno.Close)
+    st.pyplot(fig)
 
-    # Create a DataFrame for future predictions
-    future_predictions_df = pd.DataFrame({
-        'Date': future_dates,
-        'Predicted_Close': future_predictions
-    })
+    st.subheader("Closing Price vs Time chart with 100MA and 200MA")
+    ma100 = retorno.Close.rolling(100).mean()
+    ma200 = retorno.Close.rolling(200).mean()
+    fig = plt.figure(figsize=(12,6))
+    plt.plot(retorno.Date, ma100, 'r')
+    plt.plot(retorno.Date, ma200, 'g')
+    plt.plot(retorno.Date, retorno.Close, 'b')
+    st.pyplot(fig)
 
+    data_training = pd.DataFrame(retorno["Close"][0:int(len(retorno)*0.7)])
+    data_testing = pd.DataFrame(retorno["Close"][int(len(retorno)*0.7): int(len(retorno))])
 
-    # Visualization using Plotly
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(x=retorno['Date'], open=retorno['Open'], high=retorno['High'], low=retorno['Low'], close=retorno['Close'], name='Historical Prices'))
-    fig.add_trace(go.Scatter(x=future_predictions_df['Date'], y=future_predictions_df['Predicted_Close'], mode='lines', name='Predicted Prices'))
-    fig.update_layout(title="Stock Price Prediction", xaxis_rangeslider_visible=False)
-    st.plotly_chart(fig)
+    from sklearn.preprocessing import MinMaxScaler
+    scaler = MinMaxScaler(feature_range=(0,1))  
 
-    st.write("RMSE for training data:", rmse_train)
-    st.write("RMSE for test data:", rmse_test)
+    data_training_array = scaler.fit_transform(data_training)
 
-def predict_stock_prices(data):
-    data['Date'] = pd.to_datetime(data['Date'])
-    data = data.set_index('Date')
-    
-    # Feature engineering: using the day of the year as a feature
-    data['DayOfYear'] = data.index.dayofyear
+    #Load model
 
-    # Split data into features (X) and target (y)
-    X = data[['DayOfYear']]
-    y = data['Close']
+    model = load_model("keras_model.h5")
 
-    # Split data into training and testing sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    #Testing part
+    past_100_days = data_training.tail(100)
+    final_df = past_100_days.append(data_testing, ignore_index = True)
+    input_data = scaler.fit_transform(final_df)
 
-    # Perform Grid Search for tuning hyperparameters
-    param_grid = {
-        'n_estimators': [50, 100, 200],
-        'max_depth': [None, 10, 20],
-        'min_samples_split': [2, 5, 10],
-        'min_samples_leaf': [1, 2, 4]
-    }
+    x_test = []
+    y_test = []
 
-    model = GridSearchCV(
-        estimator=RandomForestRegressor(random_state=42),
-        param_grid=param_grid,
-        cv=3,
-        n_jobs=-1
-    )
-    model.fit(X_train, y_train)
+    for i in range(100,input_data.shape[0]):
+        x_test.append(input_data[i-100: i])
+        y_test.append(input_data[i,0])
 
-    # Make predictions
-    predictions_train = model.predict(X_train)
-    predictions_test = model.predict(X_test)
+    x_test, y_test = np.array(x_test), np.array(y_test)
 
-    # Calculate RMSE for training and testing predictions
-    rmse_train = mean_squared_error(y_train, predictions_train, squared=False)
-    rmse_test = mean_squared_error(y_test, predictions_test, squared=False)
+    y_predicted = model.predict(x_test)
 
-    return model, rmse_train, rmse_test
+    scale_factor = 1/(scaler.scale_[0])
+    y_predicted = y_predicted * scale_factor
+    y_test = y_test * scale_factor
+
+    #Final graph
+    st.subheader("Predictions vs Original")
+    fig2 = plt.figure(figsize=(12,6))
+    plt.plot(y_test, 'b', label= 'Original Price')
+    plt.plot(y_predicted, 'r', label= 'Predicted Price')
+    plt.xlabel("Time")
+    plt.ylabel("Price")
+    plt.legend()
+    st.pyplot(fig2)
+
 
 # Função principal
 def main():
