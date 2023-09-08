@@ -294,7 +294,11 @@ def index_prediction():
 
     #Load model
 
-    model = load_model("keras_model.h5")
+    try:
+        model = load_model("keras_model.h5")
+    except Exception as e:
+        st.error(f"Error loading the Keras model: {e}")
+        return
 
     #Testing part
     past_100_days = data_training.tail(100)
